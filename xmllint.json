@@ -1,0 +1,7 @@
+{
+    "bnf":true,
+    "min_nonterminals": 1,
+    "<start>": ["<option>+"],
+    "<option>": ["<options> "],
+    "<options>": ["--version ", "--debug ", "--shell ", "--debugent ", "--copy ", "--recover ", "--huge ", "--noent ", "--noenc ", "--noout ", "--load-trace ", "--nonet ", "--nocompact ", "--htmlout ", "--nowrap ", "--valid ", "--postvalid ", "--quiet ", "--timing ", "--repeat ", "--insert ", "--compress ", "--html ", "--xmlout ", "--nodefdtd ", "--push ", "--pushsmall ", "--memory ", "--nowarning ", "--noblanks ", "--nocdata ", "--format ", "--dropdtd ", "--c14n ", "--c14n11 ", "--exc-c14n ", "--nsclean ", "--testIO ", "--catalogs ", "--nocatalogs", "--auto ", "--xinclude ", "--noxincludenode ", "--nofixup-base-uris ", "--loaddtd ", "--dtdattr ", "--stream ", "--walker ", "--chkregister ", "--sax1", "--sax", "--oldxml10"]
+}

@@ -1,0 +1,44 @@
+{
+    "bnf": true,
+    "min_nonterminals": 3,
+    "max_nonterminals": 7,
+    "<start>": ["-i pipe:0 <options>+ pipe:1"],
+    "<options>": [
+        "-f <format> ",
+        "-vn ",
+        "-pass <n> ",
+        "-umv ",
+        "-vstats ",
+        "-c:v <codedcs> ",
+        "-c:a <ca> ",
+        "-b:a <size> "
+    ],
+    "<n>": ["1", "2"],
+    "<format>": [
+        "avi",
+        "flv",
+        "dvd",
+        "h264",
+        "m4v",
+        "mov"
+    ],
+    "<codedcs>": [
+        "rawvideo",
+        "libdav1d",
+        "v210",
+        "gif",
+        "a64multi"
+    ],
+    "<ca>": [
+        "copy",
+        "libfdk_aac",
+        "aac"
+    ],
+    "<size>": [
+        "32k",
+        "64k",
+        "128k",
+        "256k",
+        "100k"
+    ]
+}

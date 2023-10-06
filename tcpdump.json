@@ -1,0 +1,129 @@
+{
+    "bnf": true,
+    "min_nonterminals": 1,
+    "max_nonterminals": 3,
+    "<start>": [
+        "<tcpdump-options>+"
+    ],
+    "<tcpdump-options>": [
+        "<hostname-resolution-option> ",
+        "<quiet-option> ",
+        "<no-timestamp-option> ",
+        "<hex-ascii-option> ",
+        "<ascii-option> ",
+        "<very-verbose-option> ",
+        "<timestamp-option> ",
+        "<time-format-option> ",
+        "<directional-option> ",
+        "<link-layer-header-option> ",
+        "<vlan-header-option> ",
+        "<rssi-header-option> ",
+        "--print ",
+        "--number ",
+        "--micro ",
+        "--nano ",
+        "-b ",
+        "-d ",
+        "-dd ",
+        "-ddd ",
+        "-f ",
+        "-E ",
+        "-H ",
+        "-I ",
+        "--monitor-mode ",
+        "--immediate-mode ",
+        "-J ",
+        "-K ",
+        "-N ",
+        "--number ",
+        "-O ",
+        "-p ",
+        "-S ",
+        "-xx ",
+        "-X ",
+        "-XX "
+    ],
+    "<hostname-resolution-option>": [
+        "-n"
+    ],
+    "<quiet-option>": [
+        "-q"
+    ],
+    "<no-timestamp-option>": [
+        "-t"
+    ],
+    "<hex-ascii-option>": [
+        "-X"
+    ],
+    "<ascii-option>": [
+        "-A"
+    ],
+    "<very-verbose-option>": [
+        "-v"
+    ],
+    "<timestamp-option>": [
+        "-T <timestamp-type>"
+    ],
+    "<time-format-option>": [
+        "-tttt <time-format>"
+    ],
+    "<directional-option>": [
+        "-Q <directional-option-value>"
+    ],
+    "<link-layer-header-option>": [
+        "-e"
+    ],
+    "<vlan-header-option>": [
+        "vlan"
+    ],
+    "<rssi-header-option>": [
+        "rssi"
+    ],
+    "<timestamp-type>": [
+        "ru",
+        "host",
+        "unix",
+        "iso",
+        "ns",
+        "inet",
+        "inet6",
+        "ip",
+        "icmp",
+        "icmp6",
+        "tcp",
+        "udp",
+        "sctp",
+        "mpls",
+        "ppp",
+        "slip",
+        "raw",
+        "llc",
+        "ieee802_11",
+        "ieee802_11_radio",
+        "prism",
+        "ah",
+        "esp",
+        "pim",
+        "vrrp",
+        "carp",
+        "atalk",
+        "aarp",
+        "decnet",
+        "lat",
+        "sca",
+        "moprc",
+        "mopdl",
+        "geneve",
+        "vxlan",
+        "nvgre"
+    ],
+    "<time-format>": [
+        "%Y-%m-%d %H:%M:%S",
+        "%H:%M:%S.%f"
+    ],
+    "<directional-option-value>": [
+        "in",
+        "out",
+        "inout"
+    ]
+}

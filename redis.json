@@ -1,0 +1,10 @@
+{
+    "bnf":true,
+    "<start>": ["<option>+"],
+    "<option>": ["<options>\n"],
+    "<digit0>": ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"],
+    "<digit>": ["1", "2", "3", "4", "5", "6", "7", "8", "9"],
+    "<integer>": ["0", "<digit><digit0>+"],
+    "<bool>": ["yes", "no"],
+    "<options>": ["port <integer> ","timeout <integer> ","tcp-backlog <integer> ","databases <integer> ","repl-diskless-sync-delay <integer> ","repl-diskless-sync-max-replicas <integer> ","replica-priority <integer> ","acllog-max-len <integer> ","auto-aof-rewrite-percentage <integer> ","slowlog-log-slower-than <integer> ","latency-monitor-threshold <integer> ","hash-max-listpack-entries <integer> ","hash-max-listpack-value <integer> ","list-max-listpack-size <integer> ","list-compress-depth <integer> ","set-max-intset-entries <integer> ","set-max-listpack-entrie <integer> ","set-max-listpack-value <integer> ","zset-max-listpack-entries <integer> ","zset-max-listpack-value <integer> ","hll-sparse-max-bytes <integer> ","stream-node-max-bytes <integer> ","hz <integer> ","protected-mode <bool> ","daemonize <bool> ","always-show-logo <bool> ","set-proc-title <bool> ","stop-writes-on-bgsave-error <bool> ","rdbcompression <bool> ","rdbchecksum <bool> ","rdb-del-sync-files <bool> ","replica-serve-stale-data <bool> ","replica-read-only <bool> ","repl-diskless-sync <bool> ","repl-disable-tcp-nodelay <bool> ","lazyfree-lazy-eviction <bool> ","lazyfree-lazy-expire <bool> ","lazyfree-lazy-server-del <bool> ","replica-lazy-flush <bool> ","lazyfree-lazy-user-del <bool> ","lazyfree-lazy-user-flush <bool> ","oom-score-adj <bool> ","disable-thp <bool> ","appendonly <bool> ","no-appendfsync-on-rewrite <bool> ","aof-load-truncated <bool> ","aof-use-rdb-preamble <bool> ","aof-timestamp-enabled <bool> ","activerehashing <bool> ","dynamic-hz <bool> ","aof-rewrite-incremental-fsync <bool> ","rdb-save-incremental-fsync <bool> ","jemalloc-bg-thread <bool> "]
+}
