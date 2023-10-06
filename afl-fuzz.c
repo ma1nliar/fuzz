@@ -545,14 +545,14 @@ static s32 EXP3_weighted_random(double* trusts, s32 nbArms) {
     for (i = 0; i < nbArms; i++) {
 
         if (rnd < trusts[i]) {
-          fprintf(reward_data, "choose %d\n", i);
+          //fprintf(reward_data, "choose %d\n", i);
           return i;
         }
 
         rnd -= trusts[i];
 
     }
-
+    sleep(1);
     PFATAL("EXP3_weighted_random");
 
 }
@@ -635,12 +635,15 @@ static void EXP3S_get_reward(struct exp3_state* s, float reward, u32 arm) {
 void init_python() {
   Py_Initialize();
   PyObject* sysPath = PySys_GetObject("path");
-  PyObject* path = PyUnicode_FromString("/home/ubuntu/fuzz/configuration-fuzz");
+  PyObject* path = PyUnicode_FromString("/home/fuzz/Desktop/fuzz/configuration-fuzz-master");
+  //change pwd
   PyList_Append(sysPath, path);
   // p_module = PyImport_ImportModule(python_script);
   p_module = PyImport_ImportModule("gen_config");
   p_json_file = PyUnicode_FromString(config_generator);
+  //puts(p_module);
   p_func = PyObject_GetAttrString(p_module, "main");
+  //p_func = NULL;
 }
 
 void finalize_python() {
@@ -1782,10 +1785,11 @@ static void read_testcases(void) {
 
   }
 
-  if (nl_cnt != 4) {
+/*  
+if (nl_cnt != 4) {
     PFATAL("Please create config_queue and input_queue.\n");
   }
-
+*/
   ACTF("Reading configuration and input.\n");
 
   for (i = 0; i < nl_cnt; i++) {
@@ -6167,7 +6171,10 @@ static double calculate_reward(double get_reward) {
     avg_reward = get_reward;
   }
   double original_reward = get_reward;
-  get_reward = get_reward / avg_reward;
+   if (avg_reward == 0.0){
+      get_reward = 0;
+  }
+  else get_reward = get_reward / avg_reward;
   if (original_reward != 0) {
     avg_reward = 0.8 * avg_reward + 0.2 * original_reward;
   }
@@ -6194,7 +6201,7 @@ static u8 fuzz_one(char** argv, enum queue_type oid, struct exp3_state *s) {
   cur_queue_discovered = total_run_times = 0;
 
   if (python_script && config_generator && oid == CONFIG_QUEUE) {
-    objs[oid].stage_max = 15;
+    objs[oid].stage_max = 8192;
     // u8 *config_path = alloc_printf("%s/.tmp.conf", out_dir);
     for (objs[oid].stage_cur = 0; objs[oid].stage_cur < objs[oid].stage_max; objs[oid].stage_cur++) {
     //   system(script_cmd);
@@ -6221,10 +6228,10 @@ static u8 fuzz_one(char** argv, enum queue_type oid, struct exp3_state *s) {
       // if (common_fuzz_stuff(argv, in_buf, len, oid, s)) goto abandon_entry;
 
     }
-    double reward = calculate_reward(((double)cur_queue_discovered / total_run_times) / 100);
-    EXP3_get_reward(s, reward, oid);
-    fprintf(reward_data, "%lf, %lf, %lf, %lf, %d, %d, %lf, %lf\n", s->rewards[INPUT_QUEUE], s->rewards[CONFIG_QUEUE], avg_reward, reward, total_run_times, cur_queue_discovered,
-                    s->trusts[INPUT_QUEUE], s->trusts[CONFIG_QUEUE]);
+    //double reward = calculate_reward(((double)cur_queue_discovered / total_run_times) / 100);
+    //EXP3_get_reward(s, reward, oid);
+    //fprintf(reward_data, "%lf, %lf, %lf, %lf, %d, %d, %lf, %lf\n", s->rewards[INPUT_QUEUE], s->rewards[CONFIG_QUEUE], avg_reward, reward, total_run_times, cur_queue_discovered,s->trusts[INPUT_QUEUE], s->trusts[CONFIG_QUEUE]);
+    
     // ck_free(config_path);
     return 0;
   }
@@ -7787,10 +7794,10 @@ havoc_stage:
     objs[oid].stage_cycles[STAGE_SPLICE] += objs[oid].stage_max;
   }
 
-  double reward = calculate_reward((double)cur_queue_discovered / total_run_times);
-  EXP3_get_reward(s, reward, oid);
-  fprintf(reward_data, "%lf, %lf, %lf, %lf, %d, %d, %lf, %lf\n", s->rewards[INPUT_QUEUE], s->rewards[CONFIG_QUEUE], avg_reward, reward, total_run_times, cur_queue_discovered,
-                    s->trusts[INPUT_QUEUE], s->trusts[CONFIG_QUEUE]);
+  //double reward = calculate_reward((double)cur_queue_discovered / total_run_times);
+  //EXP3_get_reward(s, reward, oid);
+  //fprintf(reward_data, "%lf, %lf, %lf, %lf, %d, %d, %lf, %lf\n", s->rewards[INPUT_QUEUE], s->rewards[CONFIG_QUEUE], avg_reward, reward, total_run_times, cur_queue_discovered,
+                    //s->trusts[INPUT_QUEUE], s->trusts[CONFIG_QUEUE]);
 
 #ifndef IGNORE_FINDS
 
@@ -9443,9 +9450,16 @@ int main(int argc, char** argv) {
     }
 
     // ACTF("Choosing queue: %s", queue_name[cur_queue]);
-
     skipped_fuzz = fuzz_one(use_argv, cur_queue, state);
-
+    
+    if (skipped_fuzz == 0)
+    {
+    	cur_queue = EXP3_choice(state);
+    	fprintf(reward_data, "choose %d\n", cur_queue);
+	double reward = calculate_reward(((double)cur_queue_discovered / total_run_times) / 100);
+        EXP3_get_reward(state, reward, cur_queue);
+        fprintf(reward_data, "%lf, %lf, %lf, %lf, %d, %d, %lf, %lf\n", state->rewards[INPUT_QUEUE], state->rewards[CONFIG_QUEUE], avg_reward, reward, total_run_times, cur_queue_discovered, state->trusts[INPUT_QUEUE], state->trusts[CONFIG_QUEUE]);
+    }
     if (!stop_soon && sync_id && !skipped_fuzz) {
       
       if (!(sync_interval_cnt++ % SYNC_INTERVAL))
@@ -9459,8 +9473,8 @@ int main(int argc, char** argv) {
     objs[cur_queue].queue_cur = objs[cur_queue].queue_cur->next;
     objs[cur_queue].current_entry++;
 
-    cur_queue = EXP3_choice(state);
-    // ACTF("Choosing queue: %s", queue_name[cur_queue]); 
+    //cur_queue = EXP3_choice(state);
+    ACTF("Choosing queue: %s", queue_name[cur_queue]); 
 
   }
 
