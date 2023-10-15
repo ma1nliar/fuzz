@@ -449,32 +449,27 @@ static double EXP3_sum(double* arr, s32 n) {
 /*Take one of the initial seeds of another queue*/
 static void set_ori(enum queue_type oid)
 {
-    s32 fd, fin;
-    s32 cnt;
+    u32 tid;
+    s32 fd;
+    struct queue_entry* target;
     if (oid == INPUT_QUEUE) {
         fd = out_fd_config; 
-        fin = alloc_printf("%s/config_queue", in_dir);
-        cnt = scandir(fin, NULL, NULL, alphasort);
+        tid = UR(objs[CONFIG_QUEUE].queued_paths);
+        target = objs[CONFIG_QUEUE].queue;
     }
     else if (oid == CONFIG_QUEUE) {
         fd = out_fd_input;
-        fin = alloc_printf("%s/input_queue", in_dir);
-        cnt = scandir(fin, NULL, NULL, alphasort);
+        tid = UR(objs[INPUT_QUEUE].queued_paths);
+        target = objs[INPUT_QUEUE].queue;
     }
     else {
         PFATAL("Unknown type...");
     }
-    srand(time(NULL));
-    s32 rnd = rand() % cnt;
+    
+    while (tid--) target = target->next;
     ftruncate(fd, 0);
     lseek(fd, 0, SEEK_SET);
-    if (oid == INPUT_QUEUE) {
-        write(fd, config[rnd].fname, config[rnd].len);
-    }
-    else if (oid == CONFIG_QUEUE) {
-        write(fd, input[rnd].fname, input[rnd].len);
-    }
-    free(fd);
+    write(fd, target->fname, target->len);
 }
 
 static void EXP3_init(struct exp3_state* s, int arms, double gamma) {
@@ -1920,7 +1915,7 @@ if (nl_cnt != 4) {
         // if (!access(dfn, F_OK)) passed_det = 1;
         // ck_free(dfn);
         ACTF("queue: name: '%s', size: '%u'", sub_fn, st.st_size);
-        if (obj_num == INPUT_QUEUE) {
+ /*       if (obj_num == INPUT_QUEUE) {
             input[in_cnt].fname = sub_nl[j]->d_name;
             u32 fd = open(sub_fn, O_RDONLY);
             off_t fileSize = getFileSize(fd);
@@ -1934,6 +1929,7 @@ if (nl_cnt != 4) {
             config[cof_cnt].len = (u32)fileSize;
             cof_cnt++;
         }
+        */
         add_to_queue(sub_fn, sub_st.st_size, 0, obj_num);
       }
       free(sub_nl);
@@ -9458,9 +9454,9 @@ int main(int argc, char** argv) {
 
   EXP3_init(state, TOTAL_QUEUE, 0.20f);
 
-  set_ori(cur_queue);
-
   while (1) {
+
+    set_ori(cur_queue);
 
     u8 skipped_fuzz;
 
