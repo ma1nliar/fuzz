@@ -1928,10 +1928,10 @@ if (nl_cnt != 4) {
             in_cnt++;
         }
         if (obj_num == CONFIG_QUEUE) {
-            input[cof_cnt].fname = sub_nl[j]->d_name;
+            config[cof_cnt].fname = sub_nl[j]->d_name;
             u32 fd = open(sub_fn, O_RDONLY);
             off_t fileSize = getFileSize(fd);
-            input[cof_cnt].len = (u32)fileSize;
+            config[cof_cnt].len = (u32)fileSize;
             cof_cnt++;
         }
         add_to_queue(sub_fn, sub_st.st_size, 0, obj_num);
