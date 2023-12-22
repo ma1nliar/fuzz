@@ -590,7 +590,7 @@ static s32 EXP3_weighted_random(double* trusts, s32 nbArms) {
         rnd -= trusts[i];
 
     }
-    sleep(1);
+    //sleep(1);
     PFATAL("EXP3_weighted_random");
 
 }
@@ -673,15 +673,12 @@ static void EXP3S_get_reward(struct exp3_state* s, float reward, u32 arm) {
 void init_python() {
   Py_Initialize();
   PyObject* sysPath = PySys_GetObject("path");
-  PyObject* path = PyUnicode_FromString("/home/fuzz/Desktop/fuzz/configuration-fuzz-master");
-  //change pwd
+  PyObject* path = PyUnicode_FromString("/home/fuzz/Desktop/my_fuzz/fuzz");
   PyList_Append(sysPath, path);
   // p_module = PyImport_ImportModule(python_script);
   p_module = PyImport_ImportModule("gen_config");
   p_json_file = PyUnicode_FromString(config_generator);
-  //puts(p_module);
   p_func = PyObject_GetAttrString(p_module, "main");
-  //p_func = NULL;
 }
 
 void finalize_python() {
@@ -1788,13 +1785,12 @@ static void setup_post(void) {
 /* Read all testcases from the input directory, then queue them for testing.
    Called at startup. */
 
-static void read_testcases(void) { //sub为config的参数
+static void read_testcases(void) {
 
   struct dirent **nl;
   s32 nl_cnt;
   u32 i;
   u32 obj_num = 0;
-  s32 in_cnt = 0, cof_cnt = 0;
   // u8* fn;
 
   /* Auto-detect non-in-place resumption attempts. */
@@ -1915,21 +1911,6 @@ if (nl_cnt != 4) {
         // if (!access(dfn, F_OK)) passed_det = 1;
         // ck_free(dfn);
         ACTF("queue: name: '%s', size: '%u'", sub_fn, st.st_size);
- /*       if (obj_num == INPUT_QUEUE) {
-            input[in_cnt].fname = sub_nl[j]->d_name;
-            u32 fd = open(sub_fn, O_RDONLY);
-            off_t fileSize = getFileSize(fd);
-            input[in_cnt].len = (u32)fileSize;
-            in_cnt++;
-        }
-        if (obj_num == CONFIG_QUEUE) {
-            config[cof_cnt].fname = sub_nl[j]->d_name;
-            u32 fd = open(sub_fn, O_RDONLY);
-            off_t fileSize = getFileSize(fd);
-            config[cof_cnt].len = (u32)fileSize;
-            cof_cnt++;
-        }
-        */
         add_to_queue(sub_fn, sub_st.st_size, 0, obj_num);
       }
       free(sub_nl);
@@ -9455,7 +9436,6 @@ int main(int argc, char** argv) {
   EXP3_init(state, TOTAL_QUEUE, 0.20f);
 
   while (1) {
-
     set_ori(cur_queue);
 
     u8 skipped_fuzz;
@@ -9517,6 +9497,7 @@ int main(int argc, char** argv) {
         EXP3_get_reward(state, reward, cur_queue);
         fprintf(reward_data, "%lf, %lf, %lf, %lf, %d, %d, %lf, %lf\n", state->rewards[INPUT_QUEUE], state->rewards[CONFIG_QUEUE], avg_reward, reward, total_run_times, cur_queue_discovered, state->trusts[INPUT_QUEUE], state->trusts[CONFIG_QUEUE]);
     }
+    
     if (!stop_soon && sync_id && !skipped_fuzz) {
       
       if (!(sync_interval_cnt++ % SYNC_INTERVAL))
