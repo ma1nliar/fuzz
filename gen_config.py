@@ -90,17 +90,6 @@ if __name__ == "__main__":
     parser.add_argument("--dest", "-d", type=str, default=None, help="destination to save configuration files")
     parser.add_argument("--min_nonterminals", "-m", type=int, default=10, help="# of non-terminals")
     args = parser.parse_args()
-
-    # random.seed(time.time())
-
-    # grammar = parse_grammar(args.file)
-
-    # for i in range(args.num):
-    #     config = gen_config(grammar, args.min_nonterminals)
-    #     if args.dest is not None:
-    #         with open(f"{args.dest}/config{i}.conf", "w") as f:
-    #             f.write(config)
-    #     print(config)
     s = main(args.file)
     print(s)
     
