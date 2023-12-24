@@ -9436,7 +9436,7 @@ int main(int argc, char** argv) {
   EXP3_init(state, TOTAL_QUEUE, 0.20f);
 
   while (1) {
-    set_ori(cur_queue);
+    if (cur_queue == CONFIG_QUEUE) set_ori(cur_queue);
 
     u8 skipped_fuzz;
 
