@@ -374,6 +374,7 @@ struct object objs[TOTAL_QUEUE] = {
   }
 };
 
+u64 last_time;
 u32 map_id = 0;
 
 /* Interesting values, as per config.h */
@@ -4430,6 +4431,10 @@ static void maybe_delete_out_dir(void) {
     ck_free(fn);
   }
 
+  fn = alloc_printf("%s/reward_data", out_dir);
+  if (unlink(fn) && errno != ENOENT) goto dir_cleanup_failed;
+  ck_free(fn);
+
   fn = alloc_printf("%s/plot_data", out_dir);
   if (unlink(fn) && errno != ENOENT) goto dir_cleanup_failed;
   ck_free(fn);
@@ -6237,7 +6242,7 @@ static u8 fuzz_one(char** argv, enum queue_type oid, struct exp3_state *s) {
   cur_queue_discovered = total_run_times = 0;
 
   if (python_script && config_generator && oid == CONFIG_QUEUE) {
-    objs[oid].stage_max = 8192;
+    objs[oid].stage_max = 200;
     // u8 *config_path = alloc_printf("%s/.tmp.conf", out_dir);
     for (objs[oid].stage_cur = 0; objs[oid].stage_cur < objs[oid].stage_max; objs[oid].stage_cur++) {
     //   system(script_cmd);
@@ -9435,6 +9440,7 @@ int main(int argc, char** argv) {
 
   EXP3_init(state, TOTAL_QUEUE, 0.20f);
 
+  last_time = start_time;
   while (1) {
     if (cur_queue == CONFIG_QUEUE) set_ori(cur_queue);
 
@@ -9495,7 +9501,8 @@ int main(int argc, char** argv) {
     	fprintf(reward_data, "choose %d\n", cur_queue);
 	double reward = calculate_reward(((double)cur_queue_discovered / total_run_times) / 100);
         EXP3_get_reward(state, reward, cur_queue);
-        fprintf(reward_data, "%lf, %lf, %lf, %lf, %d, %d, %lf, %lf\n", state->rewards[INPUT_QUEUE], state->rewards[CONFIG_QUEUE], avg_reward, reward, total_run_times, cur_queue_discovered, state->trusts[INPUT_QUEUE], state->trusts[CONFIG_QUEUE]);
+        fprintf(reward_data, "%lf, %lf, %lf, %lf, %d, %d, %lf, %lf %lld\n", state->rewards[INPUT_QUEUE], state->rewards[CONFIG_QUEUE], avg_reward, reward, total_run_times, cur_queue_discovered, state->trusts[INPUT_QUEUE], state->trusts[CONFIG_QUEUE], get_cur_time() - last_time);
+        last_time = get_cur_time();
     }
     
     if (!stop_soon && sync_id && !skipped_fuzz) {
