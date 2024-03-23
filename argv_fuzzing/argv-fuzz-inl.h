@@ -63,9 +63,11 @@ static char **afl_init_argv(int *argc, char** argv) {
   static char  in_buf[MAX_CMDLINE_LEN];
   static char *ret[MAX_CMDLINE_PAR];
 
+  FILE *old_file = fopen("old_argv.txt", "w");
   for (int i = 0; i < *argc; i++) {
-    printf("old argv[%d]: %s\n", i, argv[i]);
+    fprintf(old_file, "old argv[%d]: %s\n", i, argv[i]);
   }
+  fclose(old_file);
 
   char *ptr = in_buf;
   int   rc = 0;
@@ -73,6 +75,10 @@ static char **afl_init_argv(int *argc, char** argv) {
   int fd = open(argv[1], O_RDONLY);
 
   if (read(fd, in_buf, MAX_CMDLINE_LEN - 2) < 0) {}
+
+  FILE* buf_file = fopen("buf_file.txt", "w");
+  fprintf(buf_file, "%s\n", in_buf);
+  fclose(buf_file);
 
   ret[rc] = argv[0];
   ++rc;
@@ -101,9 +107,12 @@ static char **afl_init_argv(int *argc, char** argv) {
 
   *argc = rc;
 
+  FILE *new_file = fopen("new_argv.txt", "w");
   for (int i = 0; i < rc; i++) {
-    printf("argv[%d]: %s\n", i, ret[i]);
+    fprintf(new_file, "argv[%d]: %s\n", i, ret[i]);
   }
+  fclose(new_file);
+ 
 
   return ret;
 

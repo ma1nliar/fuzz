@@ -1,7 +1,8 @@
 {
   "ExpandedNodes": [
-    ""
+    "",
+    "\\argv_fuzzing"
   ],
-  "SelectedNode": "\\afl-fuzz.c",
+  "SelectedNode": "\\types.h",
   "PreviewInSolutionExplorer": false
 }

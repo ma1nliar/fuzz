@@ -1,52 +1,102 @@
+/*
+   american fuzzy lop++ - sample argv fuzzing wrapper
+   ------------------------------------------------
+
+   Originally written by Michal Zalewski
+
+   Copyright 2015 Google Inc. All rights reserved.
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at:
+
+     http://www.apache.org/licenses/LICENSE-2.0
+
+   This file shows a simple way to fuzz command-line parameters with stock
+   afl-fuzz. To use, add:
+
+   #include "/path/to/argv-fuzz-inl.h"
+
+   ...to the file containing main(), ideally placing it after all the
+   standard includes. Next, put AFL_INIT_ARGV(); near the very beginning of
+   main().
+
+   This will cause the program to read NUL-delimited input from stdin and
+   put it in argv[]. Two subsequent NULs terminate the array. Empty
+   params are encoded as a lone 0x02. Lone 0x02 can't be generated, but
+   that shouldn't matter in real life.
+
+   If you would like to always preserve argv[0], use this instead:
+   AFL_INIT_SET0("prog_name");
+
+*/
+
 #ifndef _HAVE_ARGV_FUZZ_INL
 #define _HAVE_ARGV_FUZZ_INL
 
-#include <unistd.h>
 #include <ctype.h>
+#include <stdio.h>
+#include <unistd.h>
 #include <fcntl.h>
 
-#define AFL_INIT_ARGV() do { \
-    int fd = open(argv[1], O_RDONLY); \
-    argv = afl_init_argv(&argc, fd); \
-    close(fd); \
+#define AFL_INIT_ARGV()          \
+  do {                           \
+                                 \
+    argv = afl_init_argv(&argc, argv); \
+                                 \
   } while (0)
 
-#define AFL_INIT_SET0(_p) do { \
+#define AFL_INIT_SET0(_p)        \
+  do {                           \
+                                 \
     argv = afl_init_argv(&argc); \
-    argv[0] = (_p); \
-    if (!argc) argc = 1; \
+    argv[0] = (_p);              \
+    if (!argc) argc = 1;         \
+                                 \
   } while (0)
 
 #define MAX_CMDLINE_LEN 100000
-#define MAX_CMDLINE_PAR 1000
+#define MAX_CMDLINE_PAR 50000
 
-static char** afl_init_argv(int* argc, int fd) {
+static char **afl_init_argv(int *argc, char** argv) {
 
   static char  in_buf[MAX_CMDLINE_LEN];
-  static char* ret[MAX_CMDLINE_PAR];
+  static char *ret[MAX_CMDLINE_PAR];
 
-  char* ptr = in_buf;
-  int   rc  = 1; /* start after argv[0] */
+  char *ptr = in_buf;
+  int   rc = 0;
 
-  if (read(fd, in_buf, MAX_CMDLINE_LEN - 2) < 0);
+  int fd = open(argv[1], O_RDONLY);
 
-  while (*ptr) {
+  if (read(fd, in_buf, MAX_CMDLINE_LEN - 2) < 0) {}
+
+  ret[rc] = argv[0];
+  ++rc;
+
+  while (*ptr && rc < MAX_CMDLINE_PAR) {
+
+    while (*ptr && isspace(*ptr)) ptr++;
+    if (!(*ptr)) break;
 
     ret[rc] = ptr;
 
-    /* insert '\0' at the end of ret[rc] on first space-sym */
-    while (*ptr && !isspace(*ptr)) ptr++;
+    rc++;
+
+    while (*ptr && !isspace(*ptr))
+      ptr++;
     *ptr = '\0';
     ptr++;
 
-    /* skip more space-syms */
-    while (*ptr && isspace(*ptr)) ptr++;
+  }
 
-    rc++;
+   if (*argc > 2) {
+    for (int i = 2; i < *argc; i++) {
+      ret[rc++] = argv[i];
+    }
   }
 
   *argc = rc;
-
+ 
   return ret;
 
 }
@@ -54,4 +104,5 @@ static char** afl_init_argv(int* argc, int fd) {
 #undef MAX_CMDLINE_LEN
 #undef MAX_CMDLINE_PAR
 
-#endif /* !_HAVE_ARGV_FUZZ_INL */
+#endif                                              /* !_HAVE_ARGV_FUZZ_INL */
+
