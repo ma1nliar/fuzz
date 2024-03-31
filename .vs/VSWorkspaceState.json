@@ -3,6 +3,6 @@
     "",
     "\\argv_fuzzing"
   ],
-  "SelectedNode": "\\types.h",
+  "SelectedNode": "\\afl-fuzz.c",
   "PreviewInSolutionExplorer": false
 }

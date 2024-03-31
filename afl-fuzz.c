@@ -455,6 +455,62 @@ static void ori_F()
 		out_file = alloc_printf("%s/.cur_input", out_dir);
 }
 
+
+
+EXP_ST void detect_file_content(s32 fd) {
+	s32 file_size, err;
+	u8* file_content;
+	u8* cwd = getcwd(NULL, 0);
+
+	if (!cwd) PFATAL("getcwd() failed");
+
+	file_size = lseek(fd, 0, SEEK_END);
+	if (file_size == -1) PFATAL("lseek() failed");
+
+	file_content = ck_alloc(file_size + 1);
+	if (!file_content) PFATAL("ck_alloc() failed");
+
+	err = lseek(fd, 0, SEEK_SET);
+	if (err == -1) PFATAL("lseek() failed");
+
+	ck_read(fd, file_content, file_size, out_fd_config);
+
+	file_content[file_size] = '\0';
+
+	u8* aa_loc = strstr(file_content, "@@");
+
+	if (aa_loc) {
+		u8* aa_subst;
+		u8* new_content;
+
+		if (!out_file) out_file = alloc_printf("%s/.cur_input", out_dir);
+
+		if (out_file[0] == '/') aa_subst = out_file;
+		else aa_subst = alloc_printf("%s/%s", cwd, out_file);
+
+		*aa_loc = 0;
+		new_content = alloc_printf("%s%s%s", file_content, aa_subst, aa_loc + 2);
+		*aa_loc = '@';
+
+		err = ftruncate(fd, 0);
+		if (err == -1) PFATAL("ftruncate() failed");
+
+		err = lseek(fd, 0, SEEK_SET);
+		if (err == -1) PFATAL("lseek() failed");
+
+		ck_write(fd, new_content, strlen(new_content), out_file_config);
+
+		ck_free(new_content);
+
+		if (out_file[0] != '/') ck_free(aa_subst);
+	}
+
+	ck_free(file_content);
+	free(cwd);
+}
+
+
+
 static void choose_option()
 {
 	struct queue_entry* target = objs[CONFIG_QUEUE].queue;
@@ -473,31 +529,93 @@ static void choose_option()
 	}
 	chose_option = target;
 
-	char buffer[1024];
-	ssize_t bytesRead, bytesWritten;
 	u8* tar_file = alloc_printf("%s", target->fname);
 	s32 tar = open(tar_file, O_RDONLY, 0600);
+	if (tar == -1) PFATAL("open() failed");
 
-	/*
-	if (tar == -1) {
-		printf("Error opening tar file: %s\n", strerror(errno));
+	if (ftruncate(fd, 0) == -1)	
+	{
+		PFATAL("ftruncate() failed");
+		sleep(1);
 	}
-	*/
-	ftruncate(fd, 0);
-	lseek(fd, 0, SEEK_SET);
-	while ((bytesRead = read(tar, buffer, 1024)) > 0) {
-		bytesWritten = write(fd, buffer, bytesRead);
-		if (bytesWritten != bytesRead) {
-			perror("write wrong!");
-			exit(1);
-		}
+
+	if (lseek(fd, 0, SEEK_SET) == -1) PFATAL("lseek() failed on '%s'", out_file_config);
+
+	s32 file_len;
+	u8* buffer;
+	file_len = lseek(tar, 0, SEEK_END);
+	if (file_len == -1) PFATAL("lseek() failed on '%s'", target->fname);
+
+	buffer = (u8*)ck_alloc(file_len);
+	if (!buffer) PFATAL("ck_alloc() failed");
+
+	if (lseek(tar, 0, SEEK_SET) != 0) PFATAL("lseek() failed on '%s'", target->fname);
+
+	if (read(tar, buffer, file_len) != file_len) PFATAL("Reading from '%s' failed", target->fname);
+	
+	close(tar);
+
+	ck_write(fd, buffer, file_len, out_file_config);
+
+	//detect_file_content(fd);
+
+	/*detect "@@" in the file and replace it with .cur_input*/
+	s32 file_size, err;
+	u8* file_content;
+	u8* cwd = getcwd(NULL, 0);
+
+	if (!cwd) PFATAL("getcwd() failed");
+
+	file_size = lseek(fd, 0, SEEK_END);
+	if (file_size == -1) PFATAL("lseek() failed");
+
+	file_content = ck_alloc(file_size + 1);
+	if (!file_content) PFATAL("ck_alloc() failed");
+
+	err = lseek(fd, 0, SEEK_SET);
+	if (err == -1) PFATAL("lseek() failed");
+
+	ck_read(fd, file_content, file_size, out_fd_config);
+
+	file_content[file_size] = '\0';
+
+	u8* aa_loc = strstr(file_content, "@@");
+
+	if (aa_loc) {
+		u8* aa_subst;
+		u8* new_content;
+
+		if (!out_file) out_file = alloc_printf("%s/.cur_input", out_dir);
+
+		if (out_file[0] == '/') aa_subst = out_file;
+		else aa_subst = alloc_printf("%s/%s", cwd, out_file);
+
+		*aa_loc = 0;
+		new_content = alloc_printf("%s%s%s", file_content, aa_subst, aa_loc + 2);
+		*aa_loc = '@';
+
+		err = ftruncate(fd, 0);
+		if (err == -1) PFATAL("ftruncate() failed");
+
+		err = lseek(fd, 0, SEEK_SET);
+		if (err == -1) PFATAL("lseek() failed");
+
+		ck_write(fd, new_content, strlen(new_content), out_file_config);
+
+		ck_free(new_content);
+
+		if (out_file[0] != '/') ck_free(aa_subst);
 	}
+
+	ck_free(file_content);
+	free(cwd);
 
 	ck_free(tar_file);
-	close(tar);
+	ck_free(buffer);
 }
 
 /*Take one of the initial seeds of another queue*/
+/*
 static void set_ori(enum queue_type oid)
 {
 	u32 tid;
@@ -523,7 +641,7 @@ static void set_ori(enum queue_type oid)
 	write(fd, target->fname, target->len);
 	close(fd);
 }
-
+*/
 static void EXP3_init(struct exp3_state* s, int arms, double gamma) {
 
 	int i;
@@ -2538,8 +2656,8 @@ EXP_ST void init_forkserver(char** argv) {
 
 		setsid();
 
-		dup2(dev_null_fd, 1);
-		dup2(dev_null_fd, 2);
+		//dup2(dev_null_fd, 1);
+		//dup2(dev_null_fd, 2);
 
 		if (out_file) {
 
@@ -2990,7 +3108,6 @@ static u8 run_target(char** argv, u32 timeout) {
 static void write_to_testcase(void* mem, u32 len, enum queue_type type) {
 
 	s32 fd;
-	/*
 		if (type == INPUT_QUEUE) {
 			fd = out_fd_input;
 		} else if (type == CONFIG_QUEUE) {
@@ -2998,7 +3115,6 @@ static void write_to_testcase(void* mem, u32 len, enum queue_type type) {
 		} else {
 			PFATAL("Unknown type...");
 		}
-		*/
 	if (type == INPUT_QUEUE)
 	{
 		if (out_file)
@@ -8778,22 +8894,31 @@ EXP_ST void setup_dirs_fds(void) {
 
 /* Setup the output file for fuzzed data, if not using -f. */
 
+EXP_ST void ori_out_fd(void) {
+
+	u8* fn_config = alloc_printf("%s/.cur_config", out_dir);
+
+	unlink(fn_config);
+
+	out_fd_config = open(fn_config, O_RDWR | O_CREAT | O_EXCL, 0600);
+	
+	if (out_fd_config < 0) PFATAL("Unable to create '%s'", fn_config);
+
+	ck_free(fn_config);
+
+}
+
 EXP_ST void setup_stdio_file(void) {
 
 	u8* fn_input = alloc_printf("%s/.cur_input", out_dir);
-	u8* fn_config = alloc_printf("%s/.cur_config", out_dir);
 
 	unlink(fn_input); /* Ignore errors */
-	unlink(fn_config);
 
 	out_fd_input = open(fn_input, O_RDWR | O_CREAT | O_EXCL, 0600);
-	out_fd_config = open(fn_config, O_RDWR | O_CREAT | O_EXCL, 0600);
 
 	if (out_fd_input < 0) PFATAL("Unable to create '%s'", fn_input);
-	if (out_fd_config < 0) PFATAL("Unable to create '%s'", fn_config);
 
 	ck_free(fn_input);
-	ck_free(fn_config);
 
 }
 
@@ -9096,6 +9221,8 @@ EXP_ST void detect_file_args(char** argv) {
 	u8* cwd = getcwd(NULL, 0);
 
 	if (!cwd) PFATAL("getcwd() failed");
+
+	if (!out_file) out_file = alloc_printf("%s/.cur_input", out_dir);
 
 	while (argv[i]) {
 
@@ -9582,11 +9709,13 @@ int main(int argc, char** argv) {
 
 	if (!timeout_given) find_timeout();
 
-	choose_option();
 	if (opt_F == 0) detect_file_args(argv + optind + 1);
 	else ori_F();
 
-	if (!out_file || !out_file_config) setup_stdio_file();
+	ori_out_fd();
+
+	if (!out_file) setup_stdio_file();
+	choose_option();
 
 	check_binary(argv[optind]);
 
