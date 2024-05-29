@@ -113,6 +113,8 @@ EXP_ST u8* in_dir,                    /* Input directory with test cases  */
 * script_cmd,
 * out_file_config;
 
+u8* tmp_trace_bits;
+
 EXP_ST u32 exec_tmout = EXEC_TIMEOUT; /* Configurable exec timeout (ms)   */
 static u32 hang_tmout = EXEC_TIMEOUT; /* Timeout used for hang det (ms)   */
 
@@ -217,7 +219,7 @@ enum queue_type cur_queue;
 
 u64 opt_F;
 
-u64 from_input, from_config;
+u64 from_input, from_config, last_from_input, last_from_config;
 
 struct exp3_state* state;
 
@@ -226,6 +228,11 @@ u32 total_run_times;
 double avg_reward = 0.0;
 
 static FILE* reward_data;
+static FILE* config_data;
+static FILE* show_config_data;
+static FILE* show_reward_data;
+s32 new_show_config_data;
+s32 new_show_reward_data;
 
 PyObject* p_module;
 PyObject* p_json_file;
@@ -255,7 +262,11 @@ struct queue_entry {
 	u8* trace_mini;                     /* Trace bytes, if kept             */
 	u32 tc_ref;                         /* Trace bytes ref count            */
 
+	u64 choosing_times;
 	u64 config_weight;
+	u64 tmp_config_weight;
+	double normal_data;
+
 	struct queue_entry* next,           /* Next element, if any             */
 		* next_100;       /* 100 elements ahead               */
 
@@ -276,8 +287,12 @@ static u32 a_extras_cnt;              /* Total number of tokens available */
 static u8* (*post_handler)(u8* buf, u32* len);
 
 u64 total_config_weight;
-u64 before_edge;
-u64 after_edge;
+u64 before_edge, after_edge;
+u64 cnt_config_seeds, last_config_seeds;
+u32 last_run_times, calculate_times;
+double used_reward;
+u64 last_time, input_time, config_time;
+u8* test_input;
 
 struct object {
 	u8  use_splicing,              /* Recombine input files?           */
@@ -431,6 +446,8 @@ printf("%02X ", mtt[(q)].in_buf[i]); \
 static inline u32 UR(u32 limit);
 static u32 count_non_255_bytes(u8* mem);
 
+static u8 run_target(char** argv, u32 timeout);
+
 static double EXP3_sum(double* arr, s32 n) {
 
 	double sum;
@@ -455,7 +472,94 @@ static void ori_F()
 		out_file = alloc_printf("%s/.cur_input", out_dir);
 }
 
+static u8 check_favour(char** argv)
+{
+	tmp_trace_bits = trace_bits;
+	struct queue_entry* target = objs[CONFIG_QUEUE].queue;
+	u32 use_tmout = exec_tmout;
+	u8 is_favour = 1;
+	while (target->next)
+	{
+		if (out_file_config) unlink(out_file_config);
+		s32 fd = open(out_file_config, O_RDWR | O_CREAT | O_EXCL, 0600);
+		if (fd == -1) PFATAL("open() failed");
 
+		u8* tar_file = alloc_printf("%s", target->fname);
+		s32 tar = open(tar_file, O_RDONLY, 0600);
+		if (tar == -1) PFATAL("open() failed");
+
+		if (ftruncate(fd, 0) == -1) PFATAL("ftruncate() failed");
+
+		if (lseek(fd, 0, SEEK_SET) == -1) PFATAL("lseek() failed on '%s'", out_file_config);
+
+		s32 file_len;
+		u8* buffer;
+		file_len = lseek(tar, 0, SEEK_END);
+		if (file_len == -1) PFATAL("lseek() failed on '%s'", target->fname);
+
+		buffer = (u8*)ck_alloc(file_len + 1);
+		if (!buffer) PFATAL("ck_alloc() failed");
+		buffer[file_len] = '\0';
+
+		if (lseek(tar, 0, SEEK_SET) != 0) PFATAL("lseek() failed on '%s'", target->fname);
+
+		if (read(tar, buffer, file_len) != file_len) PFATAL("Reading from '%s' failed", target->fname);
+
+		close(tar);
+
+		//detect "@@" in the file and replace it with .cur_input
+
+		s32 err;
+		u8* cwd = getcwd(NULL, 0);
+
+		if (!cwd) PFATAL("getcwd() failed");
+		u8* aa_loc = strstr(buffer, "@@");
+
+		if (aa_loc) {
+			u8* aa_subst;
+			u8* new_content;
+
+			if (!out_file) out_file = alloc_printf("%s/.cur_input", out_dir);
+
+			if (out_file[0] == '/') aa_subst = out_file;
+			else aa_subst = alloc_printf("%s/%s", cwd, out_file);
+
+			*aa_loc = 0;
+			new_content = alloc_printf("%s%s%s", buffer, aa_subst, aa_loc + 2);
+			*aa_loc = '@';
+
+			err = ftruncate(fd, 0);
+			if (err == -1) PFATAL("ftruncate() failed");
+
+			err = lseek(fd, 0, SEEK_SET);
+			if (err == -1) PFATAL("lseek() failed");
+
+			ck_write(fd, new_content, strlen(new_content), out_file_config);
+
+			ck_free(new_content);
+
+			if (out_file[0] != '/') ck_free(aa_subst);
+		}
+
+		close(fd);
+		free(cwd);
+
+		ck_free(tar_file);
+		ck_free(buffer);
+		run_target(argv, use_tmout);
+		for (u64 i = 0; i < MAP_SIZE; i++)
+		{
+			if (trace_bits[i] && tmp_trace_bits[i]) tmp_trace_bits[i] = 0;
+		}
+		target = target->next;
+	}
+	for (u64 i = 0; i < MAP_SIZE; i++)
+	{
+		if (tmp_trace_bits[i]) return is_favour;
+	}
+	is_favour = 0;
+	return is_favour;
+}
 
 EXP_ST void detect_file_content(s32 fd) {
 	s32 file_size, err;
@@ -473,7 +577,7 @@ EXP_ST void detect_file_content(s32 fd) {
 	err = lseek(fd, 0, SEEK_SET);
 	if (err == -1) PFATAL("lseek() failed");
 
-	ck_read(fd, file_content, file_size, out_fd_config);
+	ck_read(fd, file_content, file_size, out_file_config);
 
 	file_content[file_size] = '\0';
 
@@ -509,13 +613,127 @@ EXP_ST void detect_file_content(s32 fd) {
 	free(cwd);
 }
 
-
+static void calculate_normal_data()
+{
+	struct queue_entry* target = objs[CONFIG_QUEUE].queue;
+	struct queue_entry* tmp = target;
+	total_config_weight = 0;
+	while (tmp)
+	{
+		tmp->tmp_config_weight = tmp->config_weight / tmp->choosing_times;
+		total_config_weight += tmp->tmp_config_weight;
+		tmp = tmp->next;
+	}
+	while (target)
+	{
+		target->normal_data = ((double)(target->tmp_config_weight + 1) / (double)(total_config_weight + cnt_config_seeds));
+		target = target->next;
+	}
+}
 
 static void choose_option()
 {
 	struct queue_entry* target = objs[CONFIG_QUEUE].queue;
-	s32 fd;
-	fd = out_fd_config;
+
+	if (out_file_config) unlink(out_file_config);
+	s32 fd = open(out_file_config, O_RDWR | O_CREAT | O_EXCL, 0600);
+	if (fd == -1) PFATAL("open() failed");
+
+	if (total_config_weight != 0)
+	{
+		u64 tmp = UR(total_config_weight);
+		while (tmp != 0) {
+			if (tmp > target->tmp_config_weight) {
+				tmp -= target->tmp_config_weight;
+				target = target->next;
+			}
+			else break;
+		}
+	}
+	chose_option = target;
+
+	u8* tar_file = alloc_printf("%s", target->fname);
+	s32 tar = open(tar_file, O_RDONLY, 0600);
+	if (tar == -1) PFATAL("open() failed");
+
+	if (ftruncate(fd, 0) == -1)
+	{
+		PFATAL("ftruncate() failed");
+		sleep(1);
+	}
+
+	if (lseek(fd, 0, SEEK_SET) == -1) PFATAL("lseek() failed on '%s'", out_file_config);
+
+	s32 file_len;
+	u8* buffer;
+	file_len = lseek(tar, 0, SEEK_END);
+	if (file_len == -1) PFATAL("lseek() failed on '%s'", target->fname);
+
+	buffer = (u8*)ck_alloc(file_len + 1);
+	if (!buffer) PFATAL("ck_alloc() failed");
+	buffer[file_len] = '\0';
+
+	if (lseek(tar, 0, SEEK_SET) != 0) PFATAL("lseek() failed on '%s'", target->fname);
+
+	if (read(tar, buffer, file_len) != file_len) PFATAL("Reading from '%s' failed", target->fname);
+
+	close(tar);
+
+	//file_content = buffer, file_size = file_len
+
+	//detect "@@" in the file and replace it with .cur_input
+
+	s32 err;
+	u8* cwd = getcwd(NULL, 0);
+
+	if (!cwd) PFATAL("getcwd() failed");
+	u8* aa_loc = strstr(buffer, "@@");
+
+	if (aa_loc) {
+		u8* aa_subst;
+		u8* new_content;
+
+		if (!out_file) out_file = alloc_printf("%s/.cur_input", out_dir);
+
+		if (out_file[0] == '/') aa_subst = out_file;
+		else aa_subst = alloc_printf("%s/%s", cwd, out_file);
+
+		*aa_loc = 0;
+		new_content = alloc_printf("%s%s%s", buffer, aa_subst, aa_loc + 2);
+		*aa_loc = '@';
+
+		err = ftruncate(fd, 0);
+		if (err == -1) PFATAL("ftruncate() failed");
+
+		err = lseek(fd, 0, SEEK_SET);
+		if (err == -1) PFATAL("lseek() failed");
+
+		ck_write(fd, new_content, strlen(new_content), out_file_config);
+		
+		//printf("Current Option:%s\n", new_content);
+		test_input = alloc_printf("%s%s%s", buffer, aa_subst, aa_loc + 2);
+
+		ck_free(new_content);
+
+		if (out_file[0] != '/') ck_free(aa_subst);
+	}
+
+	close(fd);
+	free(cwd);
+
+	ck_free(tar_file);
+	ck_free(buffer);
+}
+
+/*
+static void choose_option()
+{
+	struct queue_entry* target = objs[CONFIG_QUEUE].queue;
+
+	if (out_file_config) unlink(out_file_config);
+	s32 fd = open(out_file_config, O_RDWR | O_CREAT | O_EXCL, 0600);
+	if (fd == -1) PFATAL("open() failed");
+
 	if (total_config_weight != 0)
 	{
 		u64 tmp = UR(total_config_weight);
@@ -559,7 +777,7 @@ static void choose_option()
 
 	//detect_file_content(fd);
 
-	/*detect "@@" in the file and replace it with .cur_input*/
+	//detect "@@" in the file and replace it with .cur_input
 	s32 file_size, err;
 	u8* file_content;
 	u8* cwd = getcwd(NULL, 0);
@@ -575,7 +793,7 @@ static void choose_option()
 	err = lseek(fd, 0, SEEK_SET);
 	if (err == -1) PFATAL("lseek() failed");
 
-	ck_read(fd, file_content, file_size, out_fd_config);
+	ck_read(fd, file_content, file_size, out_file_config);
 
 	file_content[file_size] = '\0';
 
@@ -601,18 +819,19 @@ static void choose_option()
 		if (err == -1) PFATAL("lseek() failed");
 
 		ck_write(fd, new_content, strlen(new_content), out_file_config);
-
 		ck_free(new_content);
 
 		if (out_file[0] != '/') ck_free(aa_subst);
 	}
 
+	close(fd);
 	ck_free(file_content);
 	free(cwd);
 
 	ck_free(tar_file);
 	ck_free(buffer);
 }
+*/
 
 /*Take one of the initial seeds of another queue*/
 /*
@@ -1334,12 +1553,6 @@ static void add_to_queue(u8* fname, u32 len, u8 passed_det, u32 oid) {
 	q->depth = objs[oid].cur_depth + 1;
 	q->passed_det = passed_det;
 
-	if (oid == CONFIG_QUEUE) {
-		after_edge = count_non_255_bytes(virgin_bits);
-		q->config_weight = after_edge - before_edge;
-		total_config_weight += q->config_weight;
-	}
-
 	if (q->depth > objs[oid].max_depth) objs[oid].max_depth = q->depth;
 
 	if (objs[oid].queue_top) {
@@ -1365,6 +1578,15 @@ static void add_to_queue(u8* fname, u32 len, u8 passed_det, u32 oid) {
 
 	last_path_time = get_cur_time();
 
+	if (oid == CONFIG_QUEUE) {
+		cnt_config_seeds++;
+		after_edge = count_non_255_bytes(virgin_bits);
+		q->config_weight = (after_edge - before_edge) * 2 + 1;
+		q->choosing_times = 1;
+		total_config_weight += q->config_weight;
+		before_edge = after_edge;
+		calculate_normal_data();
+	}
 }
 
 
@@ -2656,8 +2878,8 @@ EXP_ST void init_forkserver(char** argv) {
 
 		setsid();
 
-		//dup2(dev_null_fd, 1);
-		//dup2(dev_null_fd, 2);
+		dup2(dev_null_fd, 1);
+		dup2(dev_null_fd, 2);
 
 		if (out_file) {
 
@@ -3111,7 +3333,8 @@ static void write_to_testcase(void* mem, u32 len, enum queue_type type) {
 		if (type == INPUT_QUEUE) {
 			fd = out_fd_input;
 		} else if (type == CONFIG_QUEUE) {
-			fd = out_fd_config;
+			unlink(out_file_config);
+			fd = open(out_file_config, O_WRONLY | O_CREAT | O_EXCL, 0600);
 		} else {
 			PFATAL("Unknown type...");
 		}
@@ -3129,8 +3352,6 @@ static void write_to_testcase(void* mem, u32 len, enum queue_type type) {
 	{
 		if (out_file_config)
 		{
-			unlink(out_file_config); /* Ignore errors. */
-			fd = open(out_file_config, O_WRONLY | O_CREAT | O_EXCL, 0600);
 			if (fd < 0) PFATAL("Unable to create '%s'", out_file_config);
 		}
 		else lseek(fd, 0, SEEK_SET);
@@ -3183,40 +3404,59 @@ static void write_to_testcase(void* mem, u32 len, enum queue_type type) {
 static void write_with_gap(void* mem, u32 len, u32 skip_at, u32 skip_len, enum queue_type type) {
 
 	s32 fd;
+	u32 tail_len = len - skip_at - skip_len;
 	if (type == INPUT_QUEUE) {
 		fd = out_fd_input;
+		if (out_file) {
+
+			unlink(out_file); /* Ignore errors. */
+
+			fd = open(out_file, O_WRONLY | O_CREAT | O_EXCL, 0600);
+
+			if (fd < 0) PFATAL("Unable to create '%s'", out_file);
+
+		}
+		else lseek(fd, 0, SEEK_SET);
+
+		if (skip_at) ck_write(fd, mem, skip_at, out_file);
+
+		if (tail_len) ck_write(fd, mem + skip_at + skip_len, tail_len, out_file);
+
+		if (!out_file) {
+
+			if (ftruncate(fd, len - skip_len)) PFATAL("ftruncate() failed");
+			lseek(fd, 0, SEEK_SET);
+
+		}
+		else close(fd);
 	}
 	else if (type == CONFIG_QUEUE) {
-		fd = out_fd_config;
+		if (out_file_config) {
+
+			unlink(out_file_config); /* Ignore errors. */
+
+			fd = open(out_file_config, O_WRONLY | O_CREAT | O_EXCL, 0600);
+
+			if (fd < 0) PFATAL("Unable to create '%s'", out_file_config);
+
+		}
+		else lseek(fd, 0, SEEK_SET);
+
+		if (skip_at) ck_write(fd, mem, skip_at, out_file_config);
+
+		if (tail_len) ck_write(fd, mem + skip_at + skip_len, tail_len, out_file_config);
+
+		if (!out_file_config) {
+
+			if (ftruncate(fd, len - skip_len)) PFATAL("ftruncate() failed");
+			lseek(fd, 0, SEEK_SET);
+
+		}
+		else close(fd);
 	}
 	else {
 		PFATAL("Unknown type...");
 	}
-	u32 tail_len = len - skip_at - skip_len;
-
-	if (out_file) {
-
-		unlink(out_file); /* Ignore errors. */
-
-		fd = open(out_file, O_WRONLY | O_CREAT | O_EXCL, 0600);
-
-		if (fd < 0) PFATAL("Unable to create '%s'", out_file);
-
-	}
-	else lseek(fd, 0, SEEK_SET);
-
-	if (skip_at) ck_write(fd, mem, skip_at, out_file);
-
-	if (tail_len) ck_write(fd, mem + skip_at + skip_len, tail_len, out_file);
-
-	if (!out_file) {
-
-		if (ftruncate(fd, len - skip_len)) PFATAL("ftruncate() failed");
-		lseek(fd, 0, SEEK_SET);
-
-	}
-	else close(fd);
-
 }
 
 
@@ -3891,6 +4131,8 @@ static u8 save_if_interesting(char** argv, void* mem, u32 len, u8 fault, enum qu
 			if (crash_mode) total_crashes++;
 			return 0;
 		}
+
+		if (q == CONFIG_QUEUE && !check_favour(argv)) return 0;
 
 #ifndef SIMPLE_FILES
 
@@ -4677,6 +4919,18 @@ static void maybe_delete_out_dir(void) {
 	}
 
 	fn = alloc_printf("%s/reward_data", out_dir);
+	if (unlink(fn) && errno != ENOENT) goto dir_cleanup_failed;
+	ck_free(fn);
+
+	fn = alloc_printf("%s/config_weight", out_dir);
+	if (unlink(fn) && errno != ENOENT) goto dir_cleanup_failed;
+	ck_free(fn);
+
+	fn = alloc_printf("%s/show_reward_data", out_dir);
+	if (unlink(fn) && errno != ENOENT) goto dir_cleanup_failed;
+	ck_free(fn);
+
+	fn = alloc_printf("%s/show_config_weight", out_dir);
 	if (unlink(fn) && errno != ENOENT) goto dir_cleanup_failed;
 	ck_free(fn);
 
@@ -5671,6 +5925,8 @@ static u32 calculate_score(struct queue_entry* q, u32 oid) {
 
 	/* Make sure that we don't go over limit. */
 
+	if (oid == CONFIG_QUEUE) perf_score *= q->normal_data;
+
 	if (perf_score > HAVOC_MAX_MULT * 100) perf_score = HAVOC_MAX_MULT * 100;
 
 	return perf_score;
@@ -6469,6 +6725,7 @@ static u8 could_be_interest(u32 old_val, u32 new_val, u8 blen, u8 check_le) {
 // }
 
 static double calculate_reward(double get_reward) {
+	if (get_reward == 0.0) return 0;
 	if (avg_reward == 0.0) {
 		avg_reward = get_reward;
 	}
@@ -6476,11 +6733,14 @@ static double calculate_reward(double get_reward) {
 	if (avg_reward == 0.0) {
 		get_reward = 0;
 	}
-	else get_reward = get_reward / avg_reward;
+	else if (used_reward != 0) get_reward = get_reward / used_reward / 2;
+	else get_reward = 0.5;
 	if (original_reward != 0) {
 		avg_reward = 0.8 * avg_reward + 0.2 * original_reward;
+		if (calculate_times % 20 == 19) used_reward = avg_reward;
+		calculate_times++;
 	}
-
+	get_reward = MIN(1, get_reward);
 	return get_reward;
 }
 
@@ -6503,7 +6763,7 @@ static u8 fuzz_one(char** argv, enum queue_type oid, struct exp3_state* s) {
 	cur_queue_discovered = total_run_times = 0;
 
 	if (python_script && config_generator && oid == CONFIG_QUEUE) {
-		objs[oid].stage_max = 200;
+		objs[oid].stage_max = 750;
 		// u8 *config_path = alloc_printf("%s/.tmp.conf", out_dir);
 		for (objs[oid].stage_cur = 0; objs[oid].stage_cur < objs[oid].stage_max; objs[oid].stage_cur++) {
 			//   system(script_cmd);
@@ -8889,11 +9149,30 @@ EXP_ST void setup_dirs_fds(void) {
 	reward_data = fdopen(fd, "w");
 	if (!reward_data) PFATAL("fopen() failed");
 	fprintf(reward_data, "# input reward, config reward, avg_reward\n");
+
+	tmp = alloc_printf("%s/config_weight", out_dir);
+	fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+	if (fd < 0) PFATAL("Unable to create '%s'", tmp);
+	ck_free(tmp);
+	config_data = fdopen(fd, "w");
+
+	tmp = alloc_printf("%s/show_config_weight", out_dir);
+	new_show_config_data = open(tmp, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+	if (new_show_config_data < 0) PFATAL("Unable to create '%s'", tmp);
+	ck_free(tmp);
+	show_config_data = fdopen(new_show_config_data, "w");
+
+	tmp = alloc_printf("%s/show_reward_data", out_dir);
+	new_show_reward_data = open(tmp, O_WRONLY | O_CREAT | O_EXCL, 0600);
+	if (new_show_reward_data < 0) PFATAL("Unable to create '%s'", tmp);
+	ck_free(tmp);
+	show_reward_data = fdopen(new_show_reward_data, "w");
 }
 
 
 /* Setup the output file for fuzzed data, if not using -f. */
 
+/*
 EXP_ST void ori_out_fd(void) {
 
 	u8* fn_config = alloc_printf("%s/.cur_config", out_dir);
@@ -8907,6 +9186,7 @@ EXP_ST void ori_out_fd(void) {
 	ck_free(fn_config);
 
 }
+*/
 
 EXP_ST void setup_stdio_file(void) {
 
@@ -9641,6 +9921,8 @@ int main(int argc, char** argv) {
 
 		}
 
+		
+
 	if (optind == argc || !in_dir || !out_dir) usage(argv[0]);
 
 	setup_signal_handlers();
@@ -9712,8 +9994,6 @@ int main(int argc, char** argv) {
 	if (opt_F == 0) detect_file_args(argv + optind + 1);
 	else ori_F();
 
-	ori_out_fd();
-
 	if (!out_file) setup_stdio_file();
 	choose_option();
 
@@ -9762,19 +10042,16 @@ int main(int argc, char** argv) {
 
 	EXP3_init(state, TOTAL_QUEUE, 0.20f);
 
+	last_time = get_cur_time();
+
 	while (1) {
 		//if (cur_queue == CONFIG_QUEUE) set_ori(cur_queue);
 		u8 skipped_fuzz;
 		cull_queue(cur_queue);
 
-		if (cur_queue == CONFIG_QUEUE) {
-			before_edge = count_non_255_bytes(virgin_bits);
-		}
-		else if (cur_queue == INPUT_QUEUE)
-		{
-			before_edge = count_non_255_bytes(virgin_bits);
-			choose_option();
-		}
+		before_edge = count_non_255_bytes(virgin_bits);
+
+		if (cur_queue == INPUT_QUEUE) choose_option();
 
 		if (!objs[cur_queue].queue_cur) {
 
@@ -9829,12 +10106,63 @@ int main(int argc, char** argv) {
 			if (cur_queue == INPUT_QUEUE)
 			{
 				after_edge = count_non_255_bytes(virgin_bits);
-				chose_option->config_weight += after_edge - before_edge;
+				chose_option->config_weight += (after_edge - before_edge) * 2;
+				chose_option->choosing_times++;
+				calculate_normal_data();
+				struct queue_entry* target = objs[CONFIG_QUEUE].queue;
+				fprintf(config_data, "cnt_config_seeds = %d\ttotal_config_weight = %d\n", cnt_config_seeds, total_config_weight);
+				if(ftruncate(new_show_config_data, 0) == -1) PFATAL("ftruncate() failed");
+				lseek(new_show_config_data, 0, SEEK_SET);
+				fprintf(show_config_data, "cnt_config_seeds = %d\ttotal_config_weight = %d\n", cnt_config_seeds, total_config_weight);
+				while (target)
+				{
+					s32 fd = open(target->fname, O_RDONLY, 0600);
+					s32 file_len = lseek(fd, 0, SEEK_END);
+					if (file_len == -1) PFATAL("lseek() failed");
+					u8* buffer;
+					buffer = (u8*)ck_alloc(file_len + 1);
+					lseek(fd, 0, SEEK_SET);
+					ck_read(fd, buffer, file_len, "config_data");
+					buffer[file_len + 1] = '\0';
+					close(fd);
+					fprintf(config_data, "%s\t%g\t\%d\t%d\n", (char*)buffer, target->normal_data, target->config_weight, target->choosing_times);
+					fprintf(show_config_data, "%s\t%g\t\%d\t%d\n", (char*)buffer, target->normal_data, target->config_weight, target->choosing_times);
+					target = target->next;
+				}
+				fprintf(config_data, "\n");
 			}
-			double reward = calculate_reward(((double)cur_queue_discovered / total_run_times) / 100);
+			//double reward = calculate_reward(((double)cur_queue_discovered / total_run_times) / 100);
+			double reward, original_reward;
+			s64 used_time;
+			if(ftruncate(new_show_reward_data, 0) == -1) PFATAL("ftruncate() failed");
+			lseek(new_show_reward_data, 0, SEEK_SET);
+			if (cur_queue == INPUT_QUEUE)
+			{
+				input_time = (get_cur_time() - last_time);
+				original_reward = ((double)(from_input - last_from_input) / input_time) * 10;
+				fprintf(reward_data, "from_input:%d     last_from_input:%d\nCurrent option:%s\n", from_input, last_from_input, test_input);
+				fprintf(show_reward_data, "from_input:%d     last_from_input:%d\nCurrent option:%s\n", from_input, last_from_input, test_input);
+				reward = calculate_reward(original_reward);
+				used_time = input_time;
+				last_from_input = from_input;
+				ck_free(test_input);
+			}
+			else
+			{
+				config_time = (get_cur_time() - last_time);
+				original_reward = ((double)(from_config - last_from_config) / config_time) * 10;
+				fprintf(reward_data, "from_config:%d     last_from_config:%d\n", from_config, last_from_config);
+				fprintf(show_reward_data, "from_config:%d     last_from_config:%d\n", from_config, last_from_config);
+				reward = calculate_reward(original_reward);
+				used_time = config_time;
+				last_from_config = from_config;
+			}
+			last_run_times = total_run_times;
 			EXP3_get_reward(state, reward, cur_queue);
-			fprintf(reward_data, "%lf, %lf, %lf, %lf, %d, %d, %lf, %lf\n", state->rewards[INPUT_QUEUE], state->rewards[CONFIG_QUEUE], avg_reward, reward, total_run_times, cur_queue_discovered, state->trusts[INPUT_QUEUE], state->trusts[CONFIG_QUEUE]);
+			fprintf(reward_data, "%lf, %lf, %g, %lf, %d, %d, %lf, %lf, %g, %lld, %g, %g\n", state->rewards[INPUT_QUEUE], state->rewards[CONFIG_QUEUE], avg_reward, reward, total_run_times, cur_queue_discovered, state->trusts[INPUT_QUEUE], state->trusts[CONFIG_QUEUE], original_reward, used_time, avg_reward, used_reward);
+			fprintf(show_reward_data, "%lf, %lf, %g, %lf, %d, %d, %lf, %lf, %g, %lld, %g, %g\n", state->rewards[INPUT_QUEUE], state->rewards[CONFIG_QUEUE], avg_reward, reward, total_run_times, cur_queue_discovered, state->trusts[INPUT_QUEUE], state->trusts[CONFIG_QUEUE], original_reward, used_time, avg_reward, used_reward);
 			cur_queue = EXP3_choice(state);
+			last_time = get_cur_time();
 			fprintf(reward_data, "choose %d\n", cur_queue);
 		}
 
