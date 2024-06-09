@@ -113,7 +113,7 @@ EXP_ST u8* in_dir,                    /* Input directory with test cases  */
 * script_cmd,
 * out_file_config;
 
-u8* tmp_trace_bits;
+u8 tmp_trace_bits[MAP_SIZE];
 
 EXP_ST u32 exec_tmout = EXEC_TIMEOUT; /* Configurable exec timeout (ms)   */
 static u32 hang_tmout = EXEC_TIMEOUT; /* Timeout used for hang det (ms)   */
@@ -238,6 +238,8 @@ PyObject* p_module;
 PyObject* p_json_file;
 PyObject* p_func;
 
+u64 total_config_chooing_times;
+
 struct queue_entry {
 
 	u8* fname;                          /* File name for the test case      */
@@ -265,6 +267,11 @@ struct queue_entry {
 	u64 choosing_times;
 	u64 config_weight;
 	u64 tmp_config_weight;
+	u64 config_run_time;
+	u64 config_single_run_time;
+	u64 total_stage_max;
+
+	double normal_run_time;
 	double normal_data;
 
 	struct queue_entry* next,           /* Next element, if any             */
@@ -287,6 +294,7 @@ static u32 a_extras_cnt;              /* Total number of tokens available */
 static u8* (*post_handler)(u8* buf, u32* len);
 
 u64 total_config_weight;
+u64 total_config_run_time;
 u64 before_edge, after_edge;
 u64 cnt_config_seeds, last_config_seeds;
 u32 last_run_times, calculate_times;
@@ -474,11 +482,13 @@ static void ori_F()
 
 static u8 check_favour(char** argv)
 {
-	tmp_trace_bits = trace_bits;
+	memcpy(tmp_trace_bits, trace_bits, MAP_SIZE);
+	u8 restor_trace_bits[MAP_SIZE];
+	memcpy(restor_trace_bits, trace_bits, MAP_SIZE);
 	struct queue_entry* target = objs[CONFIG_QUEUE].queue;
 	u32 use_tmout = exec_tmout;
 	u8 is_favour = 1;
-	while (target->next)
+	while (target)
 	{
 		if (out_file_config) unlink(out_file_config);
 		s32 fd = open(out_file_config, O_RDWR | O_CREAT | O_EXCL, 0600);
@@ -553,6 +563,7 @@ static u8 check_favour(char** argv)
 		}
 		target = target->next;
 	}
+	memcpy(trace_bits, restor_trace_bits, MAP_SIZE);
 	for (u64 i = 0; i < MAP_SIZE; i++)
 	{
 		if (tmp_trace_bits[i]) return is_favour;
@@ -613,6 +624,20 @@ EXP_ST void detect_file_content(s32 fd) {
 	free(cwd);
 }
 
+/*
+static void calculate_single_time()
+{
+	struct queue_entry* target = objs[CONFIG_QUEUE].queue;
+	total_config_chooing_times = 0;
+	while (target)
+	{
+		total_config_chooing_times += target->choosing_times;
+		target->config_single_run_time = target->config_run_time / target->choosing_times;
+		target = target->next;
+	}
+}
+*/
+
 static void calculate_normal_data()
 {
 	struct queue_entry* target = objs[CONFIG_QUEUE].queue;
@@ -621,6 +646,8 @@ static void calculate_normal_data()
 	while (tmp)
 	{
 		tmp->tmp_config_weight = tmp->config_weight / tmp->choosing_times;
+		if (tmp->config_single_run_time == 0) tmp->tmp_config_weight = tmp->tmp_config_weight * 10;
+		else tmp->tmp_config_weight = tmp->tmp_config_weight * 5000 / tmp->config_single_run_time;
 		total_config_weight += tmp->tmp_config_weight;
 		tmp = tmp->next;
 	}
@@ -5869,10 +5896,29 @@ static u32 calculate_score(struct queue_entry* q, u32 oid) {
 	u32 avg_exec_us = objs[oid].total_cal_us / objs[oid].total_cal_cycles;
 	u32 avg_bitmap_size = total_bitmap_size / total_bitmap_entries;
 	u32 perf_score = 100;
+	u32 config_avg_exec_us = objs[CONFIG_QUEUE].total_cal_us / objs[CONFIG_QUEUE].total_cal_cycles;
+	double multiple_score = 1;
 
 	/* Adjust score based on execution speed of this path, compared to the
 	  global average. Multiplier ranges from 0.1x to 3x. Fast inputs are
 	  less expensive to fuzz, so we're giving them more air time. */
+
+	if (oid == INPUT_QUEUE)
+	{
+		if (chose_option->config_single_run_time == 0) multiple_score = 0.01;
+		else if (chose_option->config_single_run_time * 0.001 > config_avg_exec_us) multiple_score = 0.001;
+		else if (chose_option->config_single_run_time * 0.005 > config_avg_exec_us) multiple_score = 0.005;
+		else if (chose_option->config_single_run_time * 0.01 > config_avg_exec_us) multiple_score = 0.01;
+		else if (chose_option->config_single_run_time * 0.05 > config_avg_exec_us) multiple_score = 0.05;
+		else if (chose_option->config_single_run_time * 0.1 > config_avg_exec_us) multiple_score = 0.1;
+		else if (chose_option->config_single_run_time * 0.1 > config_avg_exec_us) multiple_score = 0.1;
+		else if (chose_option->config_single_run_time * 0.25 > config_avg_exec_us) multiple_score = 0.25;
+		else if (chose_option->config_single_run_time * 0.5 > config_avg_exec_us) multiple_score = 0.5;
+		else if (chose_option->config_single_run_time * 0.75 > config_avg_exec_us) multiple_score = 0.75;
+		else if (chose_option->config_single_run_time * 4 < config_avg_exec_us) multiple_score = 3;
+		else if (chose_option->config_single_run_time * 3 < config_avg_exec_us) multiple_score = 2;
+		else if (chose_option->config_single_run_time * 2 < config_avg_exec_us) multiple_score = 1.5;
+	}
 
 	if (q->exec_us * 0.1 > avg_exec_us) perf_score = 10;
 	else if (q->exec_us * 0.25 > avg_exec_us) perf_score = 25;
@@ -5925,7 +5971,9 @@ static u32 calculate_score(struct queue_entry* q, u32 oid) {
 
 	/* Make sure that we don't go over limit. */
 
-	if (oid == CONFIG_QUEUE) perf_score *= q->normal_data;
+	if (oid == CONFIG_QUEUE) perf_score *= (int)q->normal_data;
+
+	if (oid == INPUT_QUEUE) perf_score *= multiple_score;
 
 	if (perf_score > HAVOC_MAX_MULT * 100) perf_score = HAVOC_MAX_MULT * 100;
 
@@ -6763,9 +6811,11 @@ static u8 fuzz_one(char** argv, enum queue_type oid, struct exp3_state* s) {
 	cur_queue_discovered = total_run_times = 0;
 
 	if (python_script && config_generator && oid == CONFIG_QUEUE) {
-		objs[oid].stage_max = 750;
+		objs[oid].stage_max = 20;
 		// u8 *config_path = alloc_printf("%s/.tmp.conf", out_dir);
 		for (objs[oid].stage_cur = 0; objs[oid].stage_cur < objs[oid].stage_max; objs[oid].stage_cur++) {
+			//if (cnt_config_seeds != last_config_seeds) objs[oid].stage_max *= 2;
+			//objs[oid].stage_max = MIN(750, objs[oid].stage_max);
 			//   system(script_cmd);
 			//   fd = open(config_path, O_RDONLY);
 
@@ -6902,6 +6952,7 @@ static u8 fuzz_one(char** argv, enum queue_type oid, struct exp3_state* s) {
 	 * TRIMMING *
 	 ************/
 
+	
 	if (!dumb_mode && !objs[oid].queue_cur->trim_done) {
 
 		u8 res = trim_case(argv, objs[oid].queue_cur, in_buf, oid);
@@ -6923,6 +6974,7 @@ static u8 fuzz_one(char** argv, enum queue_type oid, struct exp3_state* s) {
 	}
 
 	memcpy(out_buf, in_buf, len);
+	
 
 	/*********************
 	 * PERFORMANCE SCORE *
@@ -10036,7 +10088,7 @@ int main(int argc, char** argv) {
 	// if (python_script && config_generator)
 	//   script_cmd = alloc_printf("python3 %s %s > %s/.tmp.conf", python_script, config_generator, out_dir);
 
-	init_python();
+	if (python_script) init_python();
 
 	state = ck_alloc(sizeof(struct exp3_state));
 
@@ -10107,8 +10159,16 @@ int main(int argc, char** argv) {
 			{
 				after_edge = count_non_255_bytes(virgin_bits);
 				chose_option->config_weight += (after_edge - before_edge) * 2;
-				chose_option->choosing_times++;
+				chose_option->choosing_times++;	
+
+				input_time = (get_cur_time() - last_time);
+				chose_option->config_run_time += input_time;
+				total_config_run_time += input_time;
+				chose_option->total_stage_max += objs[INPUT_QUEUE].stage_max;
+				chose_option->config_single_run_time = chose_option->config_run_time / chose_option->total_stage_max;
+				//calculate_single_time();
 				calculate_normal_data();
+
 				struct queue_entry* target = objs[CONFIG_QUEUE].queue;
 				fprintf(config_data, "cnt_config_seeds = %d\ttotal_config_weight = %d\n", cnt_config_seeds, total_config_weight);
 				if(ftruncate(new_show_config_data, 0) == -1) PFATAL("ftruncate() failed");
@@ -10125,8 +10185,8 @@ int main(int argc, char** argv) {
 					ck_read(fd, buffer, file_len, "config_data");
 					buffer[file_len + 1] = '\0';
 					close(fd);
-					fprintf(config_data, "%s\t%g\t\%d\t%d\n", (char*)buffer, target->normal_data, target->config_weight, target->choosing_times);
-					fprintf(show_config_data, "%s\t%g\t\%d\t%d\n", (char*)buffer, target->normal_data, target->config_weight, target->choosing_times);
+					fprintf(config_data, "%s\t%g\t%d\t\%d\t%d\n", (char*)buffer, target->normal_data, target->config_single_run_time, target->config_weight, target->choosing_times);
+					fprintf(show_config_data, "%s\t%g\t%d\t\%d\t%d\n", (char*)buffer, target->normal_data, target->config_single_run_time, target->config_weight, target->choosing_times);
 					target = target->next;
 				}
 				fprintf(config_data, "\n");
@@ -10138,7 +10198,6 @@ int main(int argc, char** argv) {
 			lseek(new_show_reward_data, 0, SEEK_SET);
 			if (cur_queue == INPUT_QUEUE)
 			{
-				input_time = (get_cur_time() - last_time);
 				original_reward = ((double)(from_input - last_from_input) / input_time) * 10;
 				fprintf(reward_data, "from_input:%d     last_from_input:%d\nCurrent option:%s\n", from_input, last_from_input, test_input);
 				fprintf(show_reward_data, "from_input:%d     last_from_input:%d\nCurrent option:%s\n", from_input, last_from_input, test_input);
@@ -10162,7 +10221,7 @@ int main(int argc, char** argv) {
 			fprintf(reward_data, "%lf, %lf, %g, %lf, %d, %d, %lf, %lf, %g, %lld, %g, %g\n", state->rewards[INPUT_QUEUE], state->rewards[CONFIG_QUEUE], avg_reward, reward, total_run_times, cur_queue_discovered, state->trusts[INPUT_QUEUE], state->trusts[CONFIG_QUEUE], original_reward, used_time, avg_reward, used_reward);
 			fprintf(show_reward_data, "%lf, %lf, %g, %lf, %d, %d, %lf, %lf, %g, %lld, %g, %g\n", state->rewards[INPUT_QUEUE], state->rewards[CONFIG_QUEUE], avg_reward, reward, total_run_times, cur_queue_discovered, state->trusts[INPUT_QUEUE], state->trusts[CONFIG_QUEUE], original_reward, used_time, avg_reward, used_reward);
 			cur_queue = EXP3_choice(state);
-			last_time = get_cur_time();
+			last_config_seeds = cnt_config_seeds;
 			fprintf(reward_data, "choose %d\n", cur_queue);
 		}
 
@@ -10180,8 +10239,8 @@ int main(int argc, char** argv) {
 		objs[cur_queue].current_entry++;
 
 		//cur_queue = EXP3_choice(state);
-		ACTF("Choosing queue: %s", queue_name[cur_queue]);
-
+		//ACTF("Choosing queue: %s", queue_name[cur_queue]);
+		last_time = get_cur_time();
 	}
 
 	// if (objs[CONFIG_QUEUE].queue_cur) show_stats();
