@@ -242,6 +242,7 @@ u64 total_config_chooing_times;
 
 struct queue_entry {
 
+	u8* corres_config;
 	u8* fname;                          /* File name for the test case      */
 	u32 len;                            /* Input length                     */
 
@@ -666,6 +667,19 @@ static void choose_option()
 	s32 fd = open(out_file_config, O_RDWR | O_CREAT | O_EXCL, 0600);
 	if (fd == -1) PFATAL("open() failed");
 
+	if (cnt_config_seeds >= 2)
+	{
+		u64 tmp = UR(1);
+		if (tmp >= 0.2)
+		{
+			while (target)
+			{
+				if (!strcmp((const char)target->fname, objs[INPUT_QUEUE].queue_cur->fname)) goto choose_finish;
+				target = target->next;
+			}
+		}
+	}
+
 	if (total_config_weight != 0)
 	{
 		u64 tmp = UR(total_config_weight);
@@ -677,7 +691,7 @@ static void choose_option()
 			else break;
 		}
 	}
-	chose_option = target;
+	choose_finish: chose_option = target;
 
 	u8* tar_file = alloc_printf("%s", target->fname);
 	s32 tar = open(tar_file, O_RDONLY, 0600);
@@ -1604,6 +1618,8 @@ static void add_to_queue(u8* fname, u32 len, u8 passed_det, u32 oid) {
 	}
 
 	last_path_time = get_cur_time();
+
+	if (oid == INPUT_QUEUE) q->corres_config = chose_option->fname;
 
 	if (oid == CONFIG_QUEUE) {
 		cnt_config_seeds++;
@@ -5905,7 +5921,7 @@ static u32 calculate_score(struct queue_entry* q, u32 oid) {
 
 	if (oid == INPUT_QUEUE)
 	{
-		if (chose_option->config_single_run_time == 0) multiple_score = 0.01;
+		if (chose_option->config_single_run_time == 0) multiple_score = 0.005;
 		else if (chose_option->config_single_run_time * 0.001 > config_avg_exec_us) multiple_score = 0.001;
 		else if (chose_option->config_single_run_time * 0.005 > config_avg_exec_us) multiple_score = 0.005;
 		else if (chose_option->config_single_run_time * 0.01 > config_avg_exec_us) multiple_score = 0.01;
@@ -10103,8 +10119,6 @@ int main(int argc, char** argv) {
 
 		before_edge = count_non_255_bytes(virgin_bits);
 
-		if (cur_queue == INPUT_QUEUE) choose_option();
-
 		if (!objs[cur_queue].queue_cur) {
 
 			objs[cur_queue].queue_cycle++;
@@ -10125,6 +10139,8 @@ int main(int argc, char** argv) {
 			if (!objs[CONFIG_QUEUE].queue_cur) {
 				objs[CONFIG_QUEUE].queue_cur = objs[CONFIG_QUEUE].queue;
 			}
+
+			if (cur_queue == INPUT_QUEUE) choose_option();
 
 			show_stats();
 
